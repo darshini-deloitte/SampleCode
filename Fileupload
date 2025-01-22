@@ -1,1 +1,116 @@
 working code
+
+ <template if:true={files}>
+                <h3>Uploaded Files:</h3>
+                <ul>
+                    <template for:each={files} for:item="file">
+                        <li key={file.Id}>
+                            <lightning-button variant="base" label="Rotate Image" 
+                                              onclick={rotateFile} data-id={file.Id}></lightning-button>
+                            <img src={fileUrl(file)} alt="Uploaded file" width="100" />
+                        </li>
+                    </template>
+                </ul>
+            </template>
+------------------------------------------------------------------------------------------------------------
+ @api recordId; // The Contact record Id to associate the file with
+    @track files = []; // List of uploaded files
+    acceptedFormats = ['.jpg', '.jpeg', '.png']; // Supported file formats
+
+    // Handle the file upload finished event
+    handleUploadFinished(event) {
+        const uploadedFiles = event.detail.files;
+        uploadedFiles.forEach(file => {
+            // Store the uploaded file information
+            this.files.push({
+                Id: file.documentId,
+                name: file.name,
+                fileUrl: `/sfc/servlet.shepherd/version/download/${file.documentId}`
+            });
+        });
+    }
+
+    // Handle the rotate button click
+    rotateFile(event) {
+        const fileId = event.target.dataset.id;
+        const file = this.files.find(f => f.Id === fileId);
+        if (file) {
+            this.rotateImage(file);
+        }
+    }
+
+    // Function to rotate the image using the Canvas API
+    rotateImage(file) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.src = file.fileUrl;
+
+        img.onload = () => {
+            const width = img.width;
+            const height = img.height;
+
+            // Set canvas size to match rotated image
+            canvas.width = height;
+            canvas.height = width;
+
+            // Rotate the image by 90 degrees
+            ctx.translate(height / 2, width / 2);
+            ctx.rotate(90 * Math.PI / 180);
+            ctx.drawImage(img, -width / 2, -height / 2);
+
+            // Get the rotated image as a base64 encoded string
+            const rotatedDataUrl = canvas.toDataURL();
+
+            // Upload the rotated image to Salesforce
+            this.uploadRotatedImage(rotatedDataUrl, file.name);
+        };
+    }
+
+    // Function to upload the rotated image
+    uploadRotatedImage(rotatedDataUrl, fileName) {
+        // Call Apex method to upload the rotated image to Salesforce
+        uploadImage({ base64Data: rotatedDataUrl.split(',')[1], fileName: fileName, parentId: this.recordId })
+            .then(result => {
+                // Show success message and refresh file list
+                this.dispatchEvent(new ShowToastEvent({
+                    title: 'Success',
+                    message: 'Image rotated and uploaded successfully!',
+                    variant: 'success'
+                }));
+                this.files = []; // Clear the current list of files
+                this.handleUploadFinished({ detail: { files: [{ documentId: result }] } }); // Refresh the file list
+            })
+            .catch(error => {
+                this.dispatchEvent(new ShowToastEvent({
+                    title: 'Error',
+                    message: 'Error uploading rotated image.',
+                    variant: 'error'
+                }));
+                console.error('Error:', error);
+            });
+    }
+
+----------------------------------------------------------------------------------------------------------------------
+
+public with sharing class FileUploadController {
+
+    @AuraEnabled
+    public static String uploadImage(String base64Data, String fileName, Id parentId) {
+        // Convert base64 string to Blob
+        Blob fileBody = EncodingUtil.base64Decode(base64Data);
+        
+        // Create a new ContentVersion record
+        ContentVersion contentVersion = new ContentVersion();
+        contentVersion.Title = fileName;
+        contentVersion.PathOnClient = fileName;
+        contentVersion.VersionData = fileBody;
+        contentVersion.FirstPublishLocationId = parentId; // Associate with the Contact record
+        
+        insert contentVersion;
+        
+        // Return the ContentDocumentId to be used for linking the file
+        return contentVersion.ContentDocumentId;
+    }
+}
+
