@@ -1,90 +1,166 @@
-import { LightningElement, api, track } from 'lwc';
-import { ShowToastEvent } from 'lightning/platformShowToastEvent';
-import uploadImage from '@salesforce/apex/FileUploadController.uploadImage'; // Apex method
+<template>
+    <lightning-card title="Crop Image">
+        <div class="slds-m-around_medium">
+            <lightning-file-upload
+                label="Upload Image"
+                accept=".jpg,.png,.jpeg"
+                onchange={handleFileChange}>
+            </lightning-file-upload>
+        </div>
 
-export default class ImageUploadRotate extends LightningElement {
-    @api recordId; // The Contact record Id to associate the file with
-    @track files = []; // List of uploaded files
-    acceptedFormats = ['.jpg', '.jpeg', '.png']; // Supported file formats
+        <template if:true={imageDataUrl}>
+            <div class="image-container" 
+                 onmousedown={handleMouseDown} 
+                 onmousemove={handleMouseMove} 
+                 onmouseup={handleMouseUp} 
+                 onmouseleave={handleMouseUp}>
+                <img src={imageDataUrl} class="image-to-crop" onload={handleImageLoad} />
+                <div class="crop-box" style={cropBoxStyle}></div>
+            </div>
+            <lightning-button label="Crop" onclick={cropImage}></lightning-button>
+        </template>
 
-    // Handle the file upload finished event
-    handleUploadFinished(event) {
-        const uploadedFiles = event.detail.files;
-        uploadedFiles.forEach(file => {
-            // Store the uploaded file information
-            this.files.push({
-                Id: file.documentId,
-                name: file.name,
-                fileUrl: `/sfc/servlet.shepherd/version/download/${file.documentId}`
-            });
-        });
-    }
+        <template if:true={croppedImage}>
+            <div class="slds-m-top_medium">
+                <img src={croppedImage} alt="Cropped Image" />
+            </div>
+        </template>
+    </lightning-card>
+</template>
+----------------------------------------------------------------------------------------------------------
+.image-container {
+    position: relative;
+    display: inline-block;
+}
 
-    // Handle the rotate button click
-    rotateFile(event) {
-        const fileId = event.target.dataset.id;
-        const file = this.files.find(f => f.Id === fileId);
+.image-to-crop {
+    max-width: 100%;
+    height: auto;
+    cursor: crosshair; /* Optional: Indicates the image is clickable */
+}
+
+.crop-box {
+    position: absolute;
+    border: 2px dashed red;
+    pointer-events: none; /* Prevent interaction with crop box */
+}
+
+
+-----------------------------------------------------------------------------------------------------------
+import { LightningElement } from 'lwc';
+
+export default class ImageCropping extends LightningElement {
+    imageDataUrl = '';
+    croppedImage = '';
+    imageElement;
+    cropArea = { x: 0, y: 0, width: 0, height: 0 };
+    croppingInProgress = false;
+    startX = 0;
+    startY = 0;
+    isDragging = false;
+
+    // Handle image file upload
+    handleFileChange(event) {
+        const file = event.target.files[0];
         if (file) {
-            this.rotateImage(file);
+            const reader = new FileReader();
+            reader.onload = () => {
+                this.imageDataUrl = reader.result;
+            };
+            reader.readAsDataURL(file);
         }
     }
 
-    // Function to rotate the image using the Canvas API
-    rotateImage(file) {
-        const img = new Image();
-        img.src = file.fileUrl;
+    // Handle image load to set initial cropping area
+    handleImageLoad() {
+        this.imageElement = this.template.querySelector('img.image-to-crop');
+        this.setCropArea();
+    }
 
-        // Make sure the canvas is created and image is loaded before proceeding
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-
-            const width = img.width;
-            const height = img.height;
-
-            // Set canvas size to match rotated image
-            canvas.width = height;
-            canvas.height = width;
-
-            // Rotate the image by 90 degrees
-            ctx.translate(height / 2, width / 2);
-            ctx.rotate(90 * Math.PI / 180);
-            ctx.drawImage(img, -width / 2, -height / 2);
-
-            // Get the rotated image as a base64 encoded string
-            const rotatedDataUrl = canvas.toDataURL();
-
-            // Upload the rotated image to Salesforce
-            this.uploadRotatedImage(rotatedDataUrl, file.name);
-        };
-
-        // Handle image loading error
-        img.onerror = (error) => {
-            console.error('Error loading image:', error);
+    // Set initial crop area (defaults to center of the image)
+    setCropArea() {
+        const imageWidth = this.imageElement.width;
+        const imageHeight = this.imageElement.height;
+        this.cropArea = {
+            x: imageWidth / 4,
+            y: imageHeight / 4,
+            width: imageWidth / 2,
+            height: imageHeight / 2,
         };
     }
 
-    // Function to upload the rotated image
-    uploadRotatedImage(rotatedDataUrl, fileName) {
-        // Call Apex method to upload the rotated image to Salesforce
-        uploadImage({ base64Data: rotatedDataUrl.split(',')[1], fileName: fileName, parentId: this.recordId })
-            .then(result => {
-                // Show success message and refresh file list
-                this.dispatchEvent(new ShowToastEvent({
-                    title: 'Success',
-                    message: 'Image rotated and uploaded successfully!',
-                    variant: 'success'
-                }));
-                this.files = []; // Clear the current list of files
-                this.handleUploadFinished({ detail: { files: [{ documentId: result }] } }); // Refresh the file list
-            })
-            .catch(error => {
-                this.dispatchEvent(new ShowToastEvent({
-                    title: 'Error',
-                    message: 'Error uploading rotated image.',
-                    variant: 'error'
-                }));
-                console.error('Error:', error);
-            });
+    // Styles for the cropping box
+    get cropBoxStyle() {
+        return `position: absolute; border: 2px dashed red; 
+                top: ${this.cropArea.y}px; 
+                left: ${this.cropArea.x}px;
+                width: ${this.cropArea.width}px; 
+                height: ${this.cropArea.height}px;`;
+    }
+
+    // Mouse down event to start cropping
+    handleMouseDown(event) {
+        const rect = this.imageElement.getBoundingClientRect();
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
+
+        if (this.isInsideCropBox(offsetX, offsetY)) {
+            this.isDragging = true;
+            this.startX = offsetX - this.cropArea.x;
+            this.startY = offsetY - this.cropArea.y;
+        } else {
+            this.cropArea.x = offsetX;
+            this.cropArea.y = offsetY;
+            this.cropArea.width = 0;
+            this.cropArea.height = 0;
+        }
+    }
+
+    // Mouse move event to resize and move the crop box
+    handleMouseMove(event) {
+        if (!this.isDragging) return;
+
+        const rect = this.imageElement.getBoundingClientRect();
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
+
+        // If the crop box is being dragged
+        this.cropArea.x = offsetX - this.startX;
+        this.cropArea.y = offsetY - this.startY;
+    }
+
+    // Mouse up event to stop dragging
+    handleMouseUp() {
+        this.isDragging = false;
+    }
+
+    // Check if the mouse is inside the cropping box
+    isInsideCropBox(x, y) {
+        return (
+            x >= this.cropArea.x &&
+            x <= this.cropArea.x + this.cropArea.width &&
+            y >= this.cropArea.y &&
+            y <= this.cropArea.y + this.cropArea.height
+        );
+    }
+
+    // Crop the image based on the selected area
+    cropImage() {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+
+        // Set canvas size to match the cropping area
+        canvas.width = this.cropArea.width;
+        canvas.height = this.cropArea.height;
+
+        // Draw the cropped image part on the canvas
+        context.drawImage(
+            this.imageElement,
+            this.cropArea.x, this.cropArea.y, this.cropArea.width, this.cropArea.height,
+            0, 0, this.cropArea.width, this.cropArea.height
+        );
+
+        // Convert the canvas to an image and display
+        this.croppedImage = canvas.toDataURL('image/png');
     }
 }
