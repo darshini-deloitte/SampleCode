@@ -1,0 +1,153 @@
+     @api recordId;
+    files;
+    selectedFileUrl;
+    image = new Image();
+    rotationAngle = 0;
+    canvas;
+    context;
+    isSelecting = false;
+    selectionStart = { x: 0, y: 0 };
+    selectionEnd = { x: 0, y: 0 };
+
+    @wire(getFilesForContact, { contactId: 'a2odp0000007rM9AAI' })
+    wiredFiles({ error, data }) {
+        console.log('data-->', data);
+        if (data) {
+            this.files = data;
+        } else if (error) {
+            this.files = undefined;
+            console.error(error);
+        }
+    }
+
+    handleFileSelect(event) {
+        const contentDocumentId = event.target.dataset.id;
+        this.selectedFileUrl = `/sfc/servlet.shepherd/version/download/${contentDocumentId}`;
+        this.loadImage();
+    }
+
+    loadImage() {
+        this.image.src = this.selectedFileUrl;
+        this.image.onload = () => {
+            this.drawCanvas();
+        };
+    }
+
+    drawCanvas() {
+        this.canvas = this.template.querySelector('.image-canvas');
+        this.context = this.canvas.getContext('2d');
+        this.canvas.width = this.image.width;
+        this.canvas.height = this.image.height;
+        this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.context.drawImage(this.image, 0, 0);
+    }
+
+    handleRotate() {
+        this.rotationAngle = (this.rotationAngle + 90) % 360;
+        this.rotateImage();
+    }
+
+    rotateImage() {
+        const canvas = this.canvas;
+        const context = this.context;
+        const angleInRadians = (this.rotationAngle * Math.PI) / 180;
+
+        canvas.width = this.image.height;
+        canvas.height = this.image.width;
+
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.save();
+        context.translate(canvas.width / 2, canvas.height / 2);
+        context.rotate(angleInRadians);
+        context.drawImage(this.image, -this.image.width / 2, -this.image.height / 2);
+        context.restore();
+    }
+
+    startSelection(event) {
+        this.isSelecting = true;
+        this.selectionStart = this.getMousePosition(event);
+        this.selectionEnd = this.selectionStart;
+    }
+
+    updateSelection(event) {
+        if (!this.isSelecting) return;
+        this.selectionEnd = this.getMousePosition(event);
+        this.drawCanvas();
+        this.drawSelectionBox();
+    }
+
+    endSelection() {
+        this.isSelecting = false;
+    }
+
+    getMousePosition(event) {
+        const rect = this.canvas.getBoundingClientRect();
+        return {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top
+        };
+    }
+
+    drawSelectionBox() {
+        const { x: startX, y: startY } = this.selectionStart;
+        const { x: endX, y: endY } = this.selectionEnd;
+        this.context.strokeStyle = 'red';
+        this.context.lineWidth = 2;
+        this.context.strokeRect(startX, startY, endX - startX, endY - startY);
+    }
+
+    applyCrop() {
+        const { x: startX, y: startY } = this.selectionStart;
+        const { x: endX, y: endY } = this.selectionEnd;
+        const cropWidth = endX - startX;
+        const cropHeight = endY - startY;
+
+        if (cropWidth <= 0 || cropHeight <= 0) {
+            alert('Invalid crop area.');
+            return;
+        }
+
+        const imageData = this.context.getImageData(startX, startY, cropWidth, cropHeight);
+
+        this.canvas.width = cropWidth;
+        this.canvas.height = cropHeight;
+        this.context.putImageData(imageData, 0, 0);
+
+        // Convert the canvas to a Blob
+       /* this.canvas.toBlob((blob) => {
+            this.uploadCroppedImage(blob);
+        }, 'image/png'); */
+    }
+
+   /* uploadCroppedImage(blob) {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const base64Data = reader.result.split(',')[1];
+
+            // Create a new ContentVersion record
+            const contentVersion = {
+                Title: 'Cropped Image',
+                PathOnClient: 'cropped_image.png',
+                VersionData: base64Data
+            };
+
+            // Use the Salesforce API to create the ContentVersion record
+            createContentVersion({ contentVersion })
+                .then((result) => {
+                    // Handle successful upload
+                    console.log('Image uploaded successfully:', result);
+                    this.updateImageUrl(result.ContentDocumentId);
+                })
+                .catch((error) => {
+                    // Handle error
+                    console.error('Error uploading image:', error);
+                });
+        };
+        reader.readAsDataURL(blob);
+    } */
+
+    updateImageUrl(contentDocumentId) {
+        // Update the image URL to point to the new file
+        this.selectedFileUrl = `/sfc/servlet.shepherd/version/download/${contentDocumentId}`;
+        this.loadImage();
+    }
