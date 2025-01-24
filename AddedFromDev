@@ -1,74 +1,112 @@
-     @api recordId;
-    files;
-    selectedFileUrl;
+<template>
+    <!-- Display uploaded files -->
+    <lightning-card title="Uploaded Files">
+        <div class="slds-p-around_medium">
+            <template for:each={files} for:item="file">
+                <div key={file.Id}>
+                    <button class="slds-button slds-button_neutral" data-id={file.LatestPublishedVersionId} onclick={handleFileSelect}>
+                        {file.Title}
+                    </button>
+                </div>
+            </template>
+        </div>
+    </lightning-card>
+
+    <!-- Modal for cropping the image -->
+    <template if:true={isCropping}>
+        <div class="modal">
+            <div class="modal-content">
+                <canvas class="image-canvas" onmousedown={startSelection} onmousemove={updateSelection} onmouseup={endSelection}></canvas>
+                <div class="controls">
+                    <button class="slds-button slds-button_brand" onclick={applyCrop}>Apply Crop</button>
+                    <button class="slds-button slds-button_neutral" onclick={handleRotate}>Rotate</button>
+                    <button class="slds-button slds-button_neutral" onclick={closeModal}>Close</button>
+                </div>
+            </div>
+        </div>
+    </template>
+</template>
+=----------------------------------------------------------------------------------
+import { LightningElement, wire, api } from 'lwc';
+import getFilesForContact from '@salesforce/apex/ContactFileController.getFilesForContact';
+
+export default class ImageCropper extends LightningElement {
+    @api recordId;
+    files = [];
+    selectedFileUrl = '';
     image = new Image();
     rotationAngle = 0;
     canvas;
     context;
-    isSelecting = false;
+    isCropping = false;
     selectionStart = { x: 0, y: 0 };
     selectionEnd = { x: 0, y: 0 };
 
     @wire(getFilesForContact, { contactId: 'a2odp0000007rM9AAI' })
     wiredFiles({ error, data }) {
-        console.log('data-->', data);
         if (data) {
             this.files = data;
         } else if (error) {
-            this.files = undefined;
+            this.files = [];
             console.error(error);
         }
     }
 
+    // Handle file selection from the UI
     handleFileSelect(event) {
         const contentDocumentId = event.target.dataset.id;
         this.selectedFileUrl = `/sfc/servlet.shepherd/version/download/${contentDocumentId}`;
         this.loadImage();
     }
 
+    // Load the image onto the canvas
     loadImage() {
         this.image.src = this.selectedFileUrl;
         this.image.onload = () => {
             this.drawCanvas();
+            this.isCropping = true; // Show the cropping modal when image is loaded
         };
     }
 
+    // Draw the image on the canvas
     drawCanvas() {
         this.canvas = this.template.querySelector('.image-canvas');
         this.context = this.canvas.getContext('2d');
         this.canvas.width = this.image.width;
         this.canvas.height = this.image.height;
         this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this.context.drawImage(this.image, 0, 0);
+        this.context.drawImage(this.image, 0, 0, this.canvas.width, this.canvas.height);
     }
 
+    // Rotate the image 90 degrees
     handleRotate() {
         this.rotationAngle = (this.rotationAngle + 90) % 360;
         this.rotateImage();
     }
 
+    // Rotate the image on the canvas
     rotateImage() {
-        const canvas = this.canvas;
-        const context = this.context;
         const angleInRadians = (this.rotationAngle * Math.PI) / 180;
 
-        canvas.width = this.image.height;
-        canvas.height = this.image.width;
+        this.canvas.width = this.image.height;
+        this.canvas.height = this.image.width;
 
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        context.save();
-        context.translate(canvas.width / 2, canvas.height / 2);
-        context.rotate(angleInRadians);
-        context.drawImage(this.image, -this.image.width / 2, -this.image.height / 2);
-        context.restore();
+        this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.context.save();
+        this.context.translate(this.canvas.width / 2, this.canvas.height / 2);
+        this.context.rotate(angleInRadians);
+        this.context.drawImage(this.image, -this.image.width / 2, -this.image.height / 2);
+        this.context.restore();
     }
 
+    // Start the selection for cropping
     startSelection(event) {
         this.isSelecting = true;
         this.selectionStart = this.getMousePosition(event);
         this.selectionEnd = this.selectionStart;
     }
 
+    // Update the selection area while dragging
     updateSelection(event) {
         if (!this.isSelecting) return;
         this.selectionEnd = this.getMousePosition(event);
@@ -76,10 +114,12 @@
         this.drawSelectionBox();
     }
 
+    // End the selection
     endSelection() {
         this.isSelecting = false;
     }
 
+    // Get mouse position relative to the canvas
     getMousePosition(event) {
         const rect = this.canvas.getBoundingClientRect();
         return {
@@ -88,6 +128,7 @@
         };
     }
 
+    // Draw the selection box on the canvas
     drawSelectionBox() {
         const { x: startX, y: startY } = this.selectionStart;
         const { x: endX, y: endY } = this.selectionEnd;
@@ -96,6 +137,7 @@
         this.context.strokeRect(startX, startY, endX - startX, endY - startY);
     }
 
+    // Apply the crop
     applyCrop() {
         const { x: startX, y: startY } = this.selectionStart;
         const { x: endX, y: endY } = this.selectionEnd;
@@ -113,41 +155,63 @@
         this.canvas.height = cropHeight;
         this.context.putImageData(imageData, 0, 0);
 
-        // Convert the canvas to a Blob
-       /* this.canvas.toBlob((blob) => {
+        // Optionally, convert the canvas to a Blob for further use (e.g., upload)
+        this.canvas.toBlob((blob) => {
             this.uploadCroppedImage(blob);
-        }, 'image/png'); */
+        }, 'image/png');
     }
 
-   /* uploadCroppedImage(blob) {
+    // Upload the cropped image (for now just logs the cropped blob)
+    uploadCroppedImage(blob) {
         const reader = new FileReader();
         reader.onload = () => {
             const base64Data = reader.result.split(',')[1];
-
-            // Create a new ContentVersion record
-            const contentVersion = {
-                Title: 'Cropped Image',
-                PathOnClient: 'cropped_image.png',
-                VersionData: base64Data
-            };
-
-            // Use the Salesforce API to create the ContentVersion record
-            createContentVersion({ contentVersion })
-                .then((result) => {
-                    // Handle successful upload
-                    console.log('Image uploaded successfully:', result);
-                    this.updateImageUrl(result.ContentDocumentId);
-                })
-                .catch((error) => {
-                    // Handle error
-                    console.error('Error uploading image:', error);
-                });
+            console.log('Cropped Image Base64 Data:', base64Data);
+            // Handle uploading logic, e.g., create ContentVersion in Salesforce here.
         };
         reader.readAsDataURL(blob);
-    } */
-
-    updateImageUrl(contentDocumentId) {
-        // Update the image URL to point to the new file
-        this.selectedFileUrl = `/sfc/servlet.shepherd/version/download/${contentDocumentId}`;
-        this.loadImage();
     }
+
+    // Close the cropping modal
+    closeModal() {
+        this.isCropping = false;
+    }
+}
+----------------------------------------------------------------------------------------------------------------
+/* Modal Styles */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-content {
+    background-color: white;
+    padding: 20px;
+    border-radius: 5px;
+    position: relative;
+    max-width: 80%;
+    max-height: 80%;
+}
+
+.controls {
+    margin-top: 10px;
+    display: flex;
+    justify-content: space-between;
+}
+
+/* Canvas */
+.image-canvas {
+    border: 1px solid #000;
+    cursor: crosshair;
+    margin-bottom: 10px;
+    display: block;
+    max-width: 100%;
+    max-height: 80vh;
+}
