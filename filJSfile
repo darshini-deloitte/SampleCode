@@ -164,3 +164,111 @@ export default class ImageCropping extends LightningElement {
         this.croppedImage = canvas.toDataURL('image/png');
     }
 }
+--------------------------------------------------------------------------------------------------------------
+import { LightningElement } from 'lwc';
+
+export default class ImageCropping extends LightningElement {
+    imageDataUrl = '';
+    croppedImage = '';
+    imageElement;
+    cropArea = { x: 0, y: 0, width: 0, height: 0 };
+    croppingInProgress = false;
+    startX = 0;
+    startY = 0;
+    isDrawing = false;
+
+    // Handle image file upload
+    handleFileChange(event) {
+        const file = event.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = () => {
+                this.imageDataUrl = reader.result;
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+
+    // Handle image load to set initial cropping area
+    handleImageLoad() {
+        this.imageElement = this.template.querySelector('img.image-to-crop');
+    }
+
+    // Styles for the cropping box
+    get cropBoxStyle() {
+        return `position: absolute; border: 2px dashed red; 
+                top: ${this.cropArea.y}px; 
+                left: ${this.cropArea.x}px;
+                width: ${this.cropArea.width}px; 
+                height: ${this.cropArea.height}px;`;
+    }
+
+    // Mouse down event to start drawing the crop box
+    handleMouseDown(event) {
+        const rect = this.imageElement.getBoundingClientRect();
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
+
+        this.isDrawing = true;
+
+        // Set the starting point for the crop box
+        this.startX = offsetX;
+        this.startY = offsetY;
+
+        // Initialize crop area with zero width and height
+        this.cropArea = { x: this.startX, y: this.startY, width: 0, height: 0 };
+    }
+
+    // Mouse move event to dynamically draw the crop box
+    handleMouseMove(event) {
+        if (!this.isDrawing) return;
+
+        const rect = this.imageElement.getBoundingClientRect();
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
+
+        // Calculate the width and height of the crop area based on mouse position
+        this.cropArea.width = offsetX - this.startX;
+        this.cropArea.height = offsetY - this.startY;
+
+        // Adjust width and height in case of negative values (dragging in any direction)
+        if (this.cropArea.width < 0) {
+            this.cropArea.x = offsetX;
+            this.cropArea.width = Math.abs(this.cropArea.width);
+        } else {
+            this.cropArea.x = this.startX;
+        }
+
+        if (this.cropArea.height < 0) {
+            this.cropArea.y = offsetY;
+            this.cropArea.height = Math.abs(this.cropArea.height);
+        } else {
+            this.cropArea.y = this.startY;
+        }
+    }
+
+    // Mouse up event to stop drawing the crop box
+    handleMouseUp() {
+        this.isDrawing = false;
+    }
+
+    // Crop the image based on the selected area
+    cropImage() {
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+
+        // Set canvas size to match the cropping area
+        canvas.width = this.cropArea.width;
+        canvas.height = this.cropArea.height;
+
+        // Draw the cropped image part on the canvas
+        context.drawImage(
+            this.imageElement,
+            this.cropArea.x, this.cropArea.y, this.cropArea.width, this.cropArea.height,
+            0, 0, this.cropArea.width, this.cropArea.height
+        );
+
+        // Convert the canvas to an image and display
+        this.croppedImage = canvas.toDataURL('image/png');
+    }
+}
