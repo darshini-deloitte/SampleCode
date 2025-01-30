@@ -1,0 +1,101 @@
+<template>
+    <lightning-card title="Uploaded Files" icon-name="standard:file">
+        <template if:true={files.data}>
+            <ul>
+                <template for:each={files.data} for:item="file">
+                    <li key={file.Id}>
+                        <lightning-button
+                            label={file.Title}
+                            onclick={handleFileClick}
+                            data-id={file.Id}
+                            data-url={file.ContentDownloadUrl}
+                        ></lightning-button>
+                    </li>
+                </template>
+            </ul>
+        </template>
+        <template if:true={showImage}>
+            <div class="slds-m-around_medium">
+                <img id="cropper-image" src={selectedImageUrl} alt="Image to Crop" />
+            </div>
+            <div class="slds-m-around_medium">
+                <lightning-button label="Crop Image" onclick={handleCrop}></lightning-button>
+            </div>
+        </template>
+    </lightning-card>
+</template>
+-----------------------------------------------------------------------------------------------------------------------------------------
+import { LightningElement, api, wire } from 'lwc';
+import { getRecord } from 'lightning/uiRecordApi';
+import { loadScript } from 'lightning/platformResourceLoader';
+import CROPPER_JS from '@salesforce/resourceUrl/cropperjs';
+import getFilesByRecordId from '@salesforce/apex/FileController.getFilesByRecordId';
+
+export default class FileViewerWithCrop extends LightningElement {
+    @api recordId; // Contact record Id
+    files;
+    selectedImageUrl;
+    showImage = false;
+    cropper;
+
+    @wire(getRecord, { recordId: '$recordId', fields: ['Contact.Id'] })
+    wiredRecord({ error, data }) {
+        if (data) {
+            this.loadFiles();
+        } else if (error) {
+            console.error('Error loading record', error);
+        }
+    }
+
+    async loadFiles() {
+        try {
+            this.files = await getFilesByRecordId({ recordId: this.recordId });
+        } catch (error) {
+            console.error('Error loading files', error);
+        }
+    }
+
+    async handleFileClick(event) {
+        const fileId = event.target.dataset.id;
+        const fileUrl = event.target.dataset.url;
+        this.selectedImageUrl = fileUrl;
+        this.showImage = true;
+
+        // Load Cropper.js library
+        await loadScript(this, CROPPER_JS + '/cropper.min.js');
+        this.initializeCropper();
+    }
+
+    initializeCropper() {
+        const imageElement = this.template.querySelector('#cropper-image');
+        if (imageElement) {
+            this.cropper = new Cropper(imageElement, {
+                aspectRatio: 1, // Square crop
+                viewMode: 1,
+                dragMode: 'move',
+                autoCropArea: 1,
+                responsive: true,
+                restore: true,
+                guides: true,
+                center: true,
+                highlight: true,
+                cropBoxMovable: true,
+                cropBoxResizable: true,
+            });
+        }
+    }
+
+    handleCrop() {
+        if (this.cropper) {
+            const croppedCanvas = this.cropper.getCroppedCanvas();
+            const croppedImageUrl = croppedCanvas.toDataURL('image/png');
+            console.log('Cropped Image URL:', croppedImageUrl);
+            // You can now save or process the cropped image URL
+        }
+    }
+}
+-----------------------------------------------------------------------------------------------------------------------------------
+img {
+    max-width: 100%;
+    height: auto;
+}
