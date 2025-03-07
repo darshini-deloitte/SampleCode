@@ -1,207 +1,108 @@
-<template>
-    <lightning-card title="Crop Image">
-        <div class="slds-m-around_medium">
-            <lightning-file-upload
-                label="Upload Image"
-                accept=".jpg,.png,.jpeg"
-                onchange={handleFileChange}>
-            </lightning-file-upload>
-        </div>
+public with sharing class PSPDeleteRecords implements Database.Batchable<SObject>,System.Schedulable, Database.Stateful {
+    
+    Boolean deleteFileRecords = false;
+    Boolean deleteTransientObject;
+    public static String deleteRecordsBatch= 'FilesandTransitentRecordDeletion';
 
-        <template if:true={imageDataUrl}>
-            <div class="image-container" 
-                 onmousedown={handleMouseDown} 
-                 onmousemove={handleMouseMove} 
-                 onmouseup={handleMouseUp} 
-                 onmouseleave={handleMouseUp}>
-                <img src={imageDataUrl} class="image-to-crop" onload={handleImageLoad} />
-                <div class="crop-box" 
-                     style={cropBoxStyle} 
-                     onmousedown={handleCropBoxMouseDown}>
-                </div>
-            </div>
-            <lightning-button label="Crop" onclick={cropImage}></lightning-button>
-            <lightning-button label="Reset" onclick={resetCrop}></lightning-button>
-        </template>
+    /**
+     * @description execute method for schedule job
+     * @param context
+     */
+    public void execute(SchedulableContext context)
+    {
+        Database.executeBatch(new PSPDeleteRecords(true));
+    }
 
-        <template if:true={croppedImage}>
-            <div class="slds-m-top_medium">
-                <img src={croppedImage} alt="Cropped Image" />
-            </div>
-        </template>
-    </lightning-card>
-</template>
----------------------------------------------------------------------------------------------------------
-import { LightningElement } from 'lwc';
-
-export default class ImageCropping extends LightningElement {
-    imageDataUrl = '';
-    croppedImage = '';
-    imageElement;
-    cropArea = { x: 100, y: 100, width: 200, height: 200, angle: 0 }; // added angle for rotation
-    isDrawing = false;
-    isDragging = false;
-    isRotating = false;
-    startX = 0;
-    startY = 0;
-    startAngle = 0;
-    centerX = 0;
-    centerY = 0;
-
-    // Handle image file upload
-    handleFileChange(event) {
-        const file = event.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = () => {
-                this.imageDataUrl = reader.result;
-            };
-            reader.readAsDataURL(file);
+    public PSPDeleteRecords(Boolean isTransientObject) {
+        if (isTransientObject) {
+            deleteTransientObject =true;
+                } else {
+            deleteTransientObject =false;
+            deleteFileRecords = true;
         }
     }
-
-    // Handle image load to set initial cropping area
-    handleImageLoad() {
-        this.imageElement = this.template.querySelector('img.image-to-crop');
-    }
-
-    // Styles for the cropping box (including rotation)
-    get cropBoxStyle() {
-        return `position: absolute; border: 2px dashed red; 
-                top: ${this.cropArea.y}px; 
-                left: ${this.cropArea.x}px;
-                width: ${this.cropArea.width}px; 
-                height: ${this.cropArea.height}px; 
-                transform: rotate(${this.cropArea.angle}deg);`;
-    }
-
-    // Mouse down event to start drawing or dragging the crop box
-    handleMouseDown(event) {
-        if (!this.isDragging && !this.isRotating) {
-            const rect = this.imageElement.getBoundingClientRect();
-            const offsetX = event.clientX - rect.left;
-            const offsetY = event.clientY - rect.top;
-
-            this.isDrawing = true;
-
-            // Set the starting point for the crop box
-            this.startX = offsetX;
-            this.startY = offsetY;
-
-            // Initialize crop area with zero width and height
-            this.cropArea = { x: this.startX, y: this.startY, width: 0, height: 0, angle: 0 };
+    /**
+	* @description start method to query records from Transitent object and ContentDocument(Only those files which has appended with delete1_)
+    * @param bc	 
+    * @return Database.QueryLocator
+	*/
+    
+    public Database.QueryLocator start(Database.BatchableContext bc) {
+        if(deleteTransientObject){
+            return TransientsSelector.newInstance().selectByTransientIdsToDeleted();
+        }else {
+            return ContentDocumentsSelector.newInstance().elevatedSelectByTitle();
         }
     }
-
-    // Mouse move event to dynamically drag the crop box or rotate it
-    handleMouseMove(event) {
-        if (this.isDrawing) {
-            // Drawing a crop box
-            const rect = this.imageElement.getBoundingClientRect();
-            const offsetX = event.clientX - rect.left;
-            const offsetY = event.clientY - rect.top;
-
-            this.cropArea.width = offsetX - this.startX;
-            this.cropArea.height = offsetY - this.startY;
-
-            // Adjust width and height for negative values
-            if (this.cropArea.width < 0) {
-                this.cropArea.x = offsetX;
-                this.cropArea.width = Math.abs(this.cropArea.width);
-            } else {
-                this.cropArea.x = this.startX;
-            }
-
-            if (this.cropArea.height < 0) {
-                this.cropArea.y = offsetY;
-                this.cropArea.height = Math.abs(this.cropArea.height);
-            } else {
-                this.cropArea.y = this.startY;
-            }
-        } else if (this.isDragging) {
-            // Dragging the crop box
-            const rect = this.imageElement.getBoundingClientRect();
-            const offsetX = event.clientX - rect.left;
-            const offsetY = event.clientY - rect.top;
-
-            // Update position of the crop box based on mouse movement
-            this.cropArea.x = offsetX - this.startX;
-            this.cropArea.y = offsetY - this.startY;
-        } else if (this.isRotating) {
-            // Rotating the crop box
-            const rect = this.imageElement.getBoundingClientRect();
-            const offsetX = event.clientX - rect.left;
-            const offsetY = event.clientY - rect.top;
-
-            // Calculate angle of rotation based on the mouse position and crop box center
-            const dx = offsetX - this.centerX;
-            const dy = offsetY - this.centerY;
-            const angle = Math.atan2(dy, dx) * (180 / Math.PI); // in degrees
-            this.cropArea.angle = angle - this.startAngle;
-        }
-    }
-
-    // Mouse up event to stop drawing, dragging, or rotating the crop box
-    handleMouseUp() {
-        if (this.isDrawing) {
-            this.isDrawing = false;
-        } else if (this.isDragging) {
-            this.isDragging = false;
-        } else if (this.isRotating) {
-            this.isRotating = false;
-        }
-    }
-
-    // Mouse down event on the crop box itself for dragging and rotating
-    handleCropBoxMouseDown(event) {
-        // Determine if the user is trying to drag or rotate
-        const rect = event.target.getBoundingClientRect();
-        const offsetX = event.clientX - rect.left;
-        const offsetY = event.clientY - rect.top;
-
-        // If mouse is near one of the corners, start rotation, otherwise drag
-        const cornerDistance = 30; // area around the corner for rotation
-        const isNearCorner = 
-            offsetX < cornerDistance || offsetX > rect.width - cornerDistance ||
-            offsetY < cornerDistance || offsetY > rect.height - cornerDistance;
-
-        if (isNearCorner) {
-            this.isRotating = true;
-            this.startAngle = Math.atan2(offsetY - this.centerY, offsetX - this.centerX) * (180 / Math.PI);
+ /**
+	* @description execute method delete the object records
+    * @param scope
+	*/
+    public void execute(Database.BatchableContext bc, List<SObject> scope) {
+        try
+		{
+        if (scope.isEmpty()) {
+            return;
         } else {
-            this.isDragging = true;
-            this.startX = offsetX;
-            this.startY = offsetY;
-            this.centerX = rect.left + rect.width / 2;
-            this.centerY = rect.top + rect.height / 2;
+            deleteScopeData(scope);
         }
+    }catch (Exception excp)
+    {
+        Application.LogEntry.error(excp);
+    }
+    }
+    /**
+	* @description Finish method
+    * @param bc
+	*/
+
+    public void finish(Database.BatchableContext bc) {
+
+       if(!deleteFileRecords){
+        PSPDeleteRecords batchJob = new PSPDeleteRecords(false);
+        Database.executeBatch(batchJob);
+       }  
+        
     }
 
-    // Crop the image based on the selected area (ignoring rotation for now)
-    cropImage() {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
+    public void deleteScopeData(List<SObject> dataToDelete)
+	{
 
-        // Set canvas size to match the cropping area
-        canvas.width = this.cropArea.width;
-        canvas.height = this.cropArea.height;
+		fflib_ISObjectUnitOfWork unitOfWork = Application.UnitOfWork.newInstance(new ElevatedContextDML());
+		unitOfWork.registerDeleted(dataToDelete);
+		unitOfWork.commitWork();
+	}
 
-        // Draw the cropped image part on the canvas
-        context.drawImage(
-            this.imageElement,
-            this.cropArea.x, this.cropArea.y, this.cropArea.width, this.cropArea.height,
-            0, 0, this.cropArea.width, this.cropArea.height
-        );
+    private without sharing class ElevatedContextDML implements fflib_SObjectUnitOfWork.IDML
+	{
+        public void dmlInsert(List<SObject> objList){
+            insert objList;
+        }
+		public void dmlUpdate(List<SObject> objList){
+            update objList;
+        }
+		/**
+		 * @description delete in elevated context
+		 * @param objList
+		 */
+		public void dmlDelete(List<SObject> objList)
+		{
+			if (!sflib_ArrayUtils.isNotEmpty(objList))
+			{
+				return;
+			}
+			delete objList;
+		}
 
-        // Convert the canvas to an image and display
-        this.croppedImage = canvas.toDataURL('image/png');
+		public void emptyRecycleBin(List<SObject> objList){
+            if (objList.isEmpty())
+			{
+				return;
+			}
+			Database.emptyRecycleBin(objList);
+        }
+		public void eventPublish(List<SObject> objList){}
     }
 
-    // Reset the crop box and uploaded image
-    resetCrop() {
-        this.cropArea = { x: 0, y: 0, width: 0, height: 0, angle: 0 };
-        this.croppedImage = '';
-        this.imageDataUrl = '';
-    }
+
 }
-------------------------------------------------------------------------------------------------------------------------
