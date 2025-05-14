@@ -1,0 +1,29 @@
+// Step 1: Query Case Records
+List<Case> cases = [SELECT Id, CaseNumber, Subject, Status, Priority, CreatedDate FROM Case LIMIT 100];
+
+// Step 2: Generate CSV content
+String csvHeader = 'Id,CaseNumber,Subject,Status,Priority,CreatedDate\n';
+String csvBody = '';
+
+for (Case c : cases) {
+    csvBody += '"' + c.Id + '","' + c.CaseNumber + '","' + c.Subject + '","' + c.Status + '","' + c.Priority + '","' + c.CreatedDate.format() + '"\n';
+}
+
+String finalCsv = csvHeader + csvBody;
+
+// Step 3: Create CSV as Attachment (Blob)
+Blob csvBlob = Blob.valueOf(finalCsv);
+
+// Step 4: Send Email with CSV Attachment
+Messaging.EmailFileAttachment attachment = new Messaging.EmailFileAttachment();
+attachment.setFileName('Cases.csv');
+attachment.setBody(csvBlob);
+attachment.setContentType('text/csv');
+
+Messaging.SingleEmailMessage email = new Messaging.SingleEmailMessage();
+email.setToAddresses(new String[] { 'your.email@example.com' }); // Replace with your email
+email.setSubject('Exported Case Records');
+email.setPlainTextBody('Please find attached the exported case records.');
+email.setFileAttachments(new Messaging.EmailFileAttachment[] { attachment });
+
+Messaging.sendEmail(new Messaging.SingleEmailMessage[] { email });
