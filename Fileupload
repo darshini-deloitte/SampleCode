@@ -78,7 +78,45 @@ public with sharing class AccountOrderDataController {
         }
         return results;
     }
-    
+    // newcode
+
+public with sharing class AccountOrderDataController {
+    @AuraEnabled(cacheable=true)
+    public static List<AccountWrapper> getAccountOrderData() {
+        List<AccountWrapper> results = new List<AccountWrapper>();
+
+        // Step 1: Query all needed data in a flat way
+        List<OrderLineItemPriority__c> priorities = [
+            SELECT Id, Name, Priority__c,
+                   OrderLineItem__r.Id,
+                   OrderLineItem__r.Quantity,
+                   OrderLineItem__r.UnitPrice,
+                   OrderLineItem__r.Order.OrderNumber,
+                   OrderLineItem__r.Order.EffectiveDate,
+                   OrderLineItem__r.Order.Account.Name
+            FROM OrderLineItemPriority__c
+        ];
+
+        // Step 2: Flatten and add to wrapper list
+        for (OrderLineItemPriority__c pri : priorities) {
+            OrderItem item = pri.OrderLineItem__r;
+            Order ord = item.Order;
+            Account acc = ord.Account;
+
+            results.add(new AccountWrapper(
+                acc.Name,
+                ord.OrderNumber,
+                ord.EffectiveDate.format(),
+                item.Quantity,
+                item.UnitPrice,
+                pri.Name,
+                pri.Priority__c
+            ));
+        }
+
+        return results;
+    }
+
     public class AccountWrapper {
         @AuraEnabled public String AccountName;
         @AuraEnabled public String OrderNumber;
@@ -87,7 +125,7 @@ public with sharing class AccountOrderDataController {
         @AuraEnabled public Decimal UnitPrice;
         @AuraEnabled public String PriorityName;
         @AuraEnabled public String PriorityLevel;
-        
+
         public AccountWrapper(String accName, String ordNum, String ordDate,
                               Decimal qty, Decimal price,
                               String priName, String priLevel) {
@@ -100,5 +138,7 @@ public with sharing class AccountOrderDataController {
             this.PriorityLevel = priLevel;
         }
     }
+}
+
 }
 
