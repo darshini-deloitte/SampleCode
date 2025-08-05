@@ -42,3 +42,63 @@ export default class AccountExcelDownload extends LightningElement {
         document.body.removeChild(link);
     }
 }
+
+
+
+public with sharing class AccountOrderDataController {
+    @AuraEnabled(cacheable=true)
+    public static List<AccountWrapper> getAccountOrderData() {
+        List<AccountWrapper> results = new List<AccountWrapper>();
+        
+        List<Account> accounts = [SELECT Id, Name, 
+                                  (SELECT Id, OrderNumber, EffectiveDate, 
+                                          (SELECT Id, Quantity, UnitPrice, 
+                                                  (SELECT Id, Name, Priority__c 
+                                                   FROM OrderLineItemPriorities__r)
+                                           FROM OrderItems)
+                                   FROM Orders)
+                                  FROM Account];
+        
+        for (Account acc : accounts) {
+            for (Order ord : acc.Orders) {
+                for (OrderItem item : ord.OrderItems) {
+                    for (OrderLineItemPriority__c pri : item.OrderLineItemPriorities__r) {
+                        results.add(new AccountWrapper(
+                            acc.Name,
+                            ord.OrderNumber,
+                            ord.EffectiveDate.format(),
+                            item.Quantity,
+                            item.UnitPrice,
+                            pri.Name,
+                            pri.Priority__c
+                        ));
+                    }
+                }
+            }
+        }
+        return results;
+    }
+    
+    public class AccountWrapper {
+        @AuraEnabled public String AccountName;
+        @AuraEnabled public String OrderNumber;
+        @AuraEnabled public String OrderDate;
+        @AuraEnabled public Decimal Quantity;
+        @AuraEnabled public Decimal UnitPrice;
+        @AuraEnabled public String PriorityName;
+        @AuraEnabled public String PriorityLevel;
+        
+        public AccountWrapper(String accName, String ordNum, String ordDate,
+                              Decimal qty, Decimal price,
+                              String priName, String priLevel) {
+            this.AccountName = accName;
+            this.OrderNumber = ordNum;
+            this.OrderDate = ordDate;
+            this.Quantity = qty;
+            this.UnitPrice = price;
+            this.PriorityName = priName;
+            this.PriorityLevel = priLevel;
+        }
+    }
+}
+
