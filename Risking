@@ -1,0 +1,78 @@
+trigger CaseOOSHandler on Case (before insert, before update) {
+    CaseOOSHelper.populateReason(Trigger.new);
+}
+
+public class CaseOOSHelper {
+    public static void populateReason(List<Case> cases) {
+        // Fetch all metadata records
+        List<OOS_Metadata__mdt> metaList = [
+            SELECT DeveloperName, OOSType__c, CCM_Paragraph__c, Range__c 
+            FROM OOS_Metadata__mdt
+        ];
+
+        for (Case c : cases) {
+            if (String.isBlank(c.OOSType__c)) continue;
+            
+            String caseOOSType = c.OOSType__c;
+            
+            // Loop metadata to find match
+            for (OOS_Metadata__mdt meta : metaList) {
+                // Example: "NK Cells;Dose Result"
+                List<String> types = meta.OOSType__c != null 
+                    ? meta.OOSType__c.split(';') : new List<String>();
+                
+                List<String> ranges = meta.Range__c != null 
+                    ? meta.Range__c.split(';') : new List<String>();
+                
+                Boolean matched = false;
+                
+                for (Integer i = 0; i < types.size() && i < ranges.size(); i++) {
+                    String type = types[i].trim();
+                    String rangeVal = ranges[i].trim();
+                    
+                    // Case value example: "Dose Result:0.1;NK Cells:14.01%"
+                    if (caseOOSType.contains(type)) {
+                        // extract case’s value for that type
+                        Pattern p = Pattern.compile(type + '\\s*:\\s*([^;]+)');
+                        Matcher m = p.matcher(caseOOSType);
+                        if (m.find()) {
+                            String caseVal = m.group(1).trim();
+                            
+                            if (isInRange(caseVal, rangeVal)) {
+                                matched = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (matched) {
+                    c.Reason__c = meta.CCM_Paragraph__c;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Helper to check numeric or percentage range
+    private static Boolean isInRange(String caseVal, String rangeVal) {
+        try {
+            // Handle % or plain number
+            String cleanCaseVal = caseVal.replace('%', '');
+            Decimal val = Decimal.valueOf(cleanCaseVal);
+            
+            if (rangeVal.contains('-')) {
+                List<String> parts = rangeVal.replace('%', '').split('-');
+                Decimal low = Decimal.valueOf(parts[0]);
+                Decimal high = Decimal.valueOf(parts[1]);
+                return val >= low && val <= high;
+            } else {
+                Decimal target = Decimal.valueOf(rangeVal.replace('%', ''));
+                return val == target;
+            }
+        } catch (Exception e) {
+            return false;
+        }
+    }
+}
+***************************************************************************************************************************************************************************
