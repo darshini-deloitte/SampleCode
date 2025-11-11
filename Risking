@@ -76,3 +76,123 @@ public class CaseOOSHelper {
     }
 }
 ***************************************************************************************************************************************************************************
+
+public class CaseOOSService {
+    // Cache metadata once per transaction
+    private static List<OOS_Metadata__mdt> metaList;
+
+    public static void populateReason(List<Case> caseList) {
+        if (caseList == null || caseList.isEmpty()) return;
+
+        // Fetch all metadata records only once
+        if (metaList == null) {
+            metaList = [
+                SELECT OOSType__c, Range__c, CCM_Paragraph__c 
+                FROM OOS_Metadata__mdt
+            ];
+        }
+
+        // Preprocess metadata
+        List<MetadataWrapper> metadataList = new List<MetadataWrapper>();
+        for (OOS_Metadata__mdt meta : metaList) {
+            if (String.isBlank(meta.OOSType__c)) continue;
+
+            List<String> types = meta.OOSType__c.split(';');
+            List<String> ranges = meta.Range__c != null ? meta.Range__c.split(';') : new List<String>();
+            metadataList.add(new MetadataWrapper(types, ranges, meta.CCM_Paragraph__c));
+        }
+
+        // Loop over all Cases in bulk
+        for (Case c : caseList) {
+            if (String.isBlank(c.OOSType__c)) continue;
+
+            String caseData = c.OOSType__c;
+            Set<String> matchedParagraphs = new Set<String>();
+
+            for (MetadataWrapper mw : metadataList) {
+                if (mw.isMatch(caseData)) {
+                    matchedParagraphs.add(mw.paragraph);
+                }
+            }
+
+            // Combine paragraphs if multiple match
+            if (!matchedParagraphs.isEmpty()) {
+                c.Reason__c = String.join(new List<String>(matchedParagraphs), '\n\n');
+            }
+        }
+    }
+
+    // Wrapper for logic encapsulation
+    private class MetadataWrapper {
+        List<String> oosTypes;
+        List<String> ranges;
+        String paragraph;
+
+        MetadataWrapper(List<String> oosTypes, List<String> ranges, String paragraph) {
+            this.oosTypes = oosTypes;
+            this.ranges = ranges;
+            this.paragraph = paragraph;
+        }
+
+        Boolean isMatch(String caseOOSType) {
+            for (Integer i = 0; i < oosTypes.size() && i < ranges.size(); i++) {
+                String type = oosTypes[i].trim();
+                String rangeVal = ranges[i].trim();
+
+                // Extract the part after type:
+                String extractedVal = extractValue(caseOOSType, type);
+                if (extractedVal == null) continue;
+
+                if (isInRange(extractedVal, rangeVal)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Native Apex way to extract value (no regex)
+        private String extractValue(String fullText, String type) {
+            // Expected format: "Dose Result:0.1;NK Cells:14.01%"
+            Integer typeIndex = fullText.toLowerCase().indexOf(type.toLowerCase());
+            if (typeIndex == -1) return null;
+
+            Integer colonIndex = fullText.indexOf(':', typeIndex);
+            if (colonIndex == -1) return null;
+
+            Integer semicolonIndex = fullText.indexOf(';', colonIndex);
+            if (semicolonIndex == -1) semicolonIndex = fullText.length();
+
+            String valuePart = fullText.substring(colonIndex + 1, semicolonIndex);
+            return valuePart != null ? valuePart.trim() : null;
+        }
+
+        // Range comparison logic
+        private Boolean isInRange(String caseVal, String rangeVal) {
+            try {
+                String cleanCaseVal = caseVal.replace('%', '').trim();
+                Decimal val = Decimal.valueOf(cleanCaseVal);
+
+                // Handle range like "14%-15%" or "14-15"
+                if (rangeVal.contains('-')) {
+                    String cleanRange = rangeVal.replace('%', '').trim();
+                    List<String> bounds = cleanRange.split('-');
+                    if (bounds.size() == 2) {
+                        Decimal low = Decimal.valueOf(bounds[0]);
+                        Decimal high = Decimal.valueOf(bounds[1]);
+                        return val >= low && val <= high;
+                    }
+                } else {
+                    // Single exact value like "0.1"
+                    String single = rangeVal.replace('%', '').trim();
+                    Decimal target = Decimal.valueOf(single);
+                    return val == target;
+                }
+            } catch (Exception e) {
+                // Ignore parsing issues gracefully
+                System.debug('Range comparison failed: ' + e.getMessage());
+            }
+            return false;
+        }
+    }
+}
+
