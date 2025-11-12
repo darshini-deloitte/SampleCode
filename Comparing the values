@@ -1,0 +1,180 @@
+public class OOSTypeRangeValidator {
+
+    // Main method — pass your input map here
+    public static void validateInputData(Map<Id, Map<String, String>> inputMap) {
+        // Step 1: Fetch all Custom Metadata
+        List<OOSTypeMetadata__mdt> metaList = [
+            SELECT DeveloperName, OOSType__c, Range__c, Paragraph__c
+            FROM OOSTypeMetadata__mdt
+        ];
+
+        // Step 2: Convert to lookup map for quick access
+        Map<String, OOSTypeMetadata__mdt> metaMap = new Map<String, OOSTypeMetadata__mdt>();
+        for (OOSTypeMetadata__mdt meta : metaList) {
+            metaMap.put(meta.OOSType__c, meta);
+        }
+
+        // Step 3: Iterate through incoming values
+        for (Id recId : inputMap.keySet()) {
+            Map<String, String> innerMap = inputMap.get(recId);
+
+            for (String keyName : innerMap.keySet()) {
+                String actualVal = innerMap.get(keyName); // Example: '18%;80'
+
+                if (metaMap.containsKey(keyName)) {
+                    OOSTypeMetadata__mdt meta = metaMap.get(keyName);
+                    Boolean isWithinRange = checkValueInRange(actualVal, meta.Range__c);
+
+                    if (isWithinRange) {
+                        System.debug('✅ Record ' + recId + ': ' + keyName + 
+                                     ' within defined range → ' + meta.Paragraph__c);
+                    } else {
+                        System.debug('❌ Record ' + recId + ': ' + keyName + 
+                                     ' is OUTSIDE defined range → ' + meta.Paragraph__c);
+                    }
+                } else {
+                    System.debug('⚠️ No metadata found for key: ' + keyName);
+                }
+            }
+        }
+    }
+
+    // Helper method to compare range values
+    private static Boolean checkValueInRange(String actualValue, String definedRange) {
+        /*
+         Example:
+         actualValue = '18%;80'
+         definedRange = '12%-25%;70-80%'
+        */
+
+        // Split values by ';' if multiple
+        List<String> actualParts = actualValue.split(';');
+        List<String> rangeParts = definedRange.split(';');
+
+        // Compare each range part
+        for (Integer i = 0; i < Math.min(actualParts.size(), rangeParts.size()); i++) {
+            String act = actualParts[i].replace('%','').trim();
+            String range = rangeParts[i].replace('%','').trim();
+
+            // Handle range format like "12-25" or single value "70"
+            if (range.contains('-')) {
+                List<String> limits = range.split('-');
+                Decimal low = Decimal.valueOf(limits[0]);
+                Decimal high = Decimal.valueOf(limits[1]);
+                Decimal actual = Decimal.valueOf(act);
+
+                if (actual < low || actual > high) {
+                    return false;
+                }
+            } else {
+                // Exact match case
+                Decimal actual = Decimal.valueOf(act);
+                Decimal target = Decimal.valueOf(range);
+                if (actual != target) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+}
+***********************************************************************************************************************************************************
+public class OOSTypeRangeValidator {
+
+    /**
+     * Main method — validates data and performs Case updates or Chatter posts.
+     * @param inputMap - Map<CaseId, Map<OOSType, ActualValue>>
+     */
+    public static void validateAndProcess(Map<Id, Map<String, String>> inputMap) {
+
+        // Step 1: Query all Custom Metadata
+        List<OOSTypeMetadata__mdt> metaList = [
+            SELECT DeveloperName, OOSType__c, Range__c, Paragraph__c
+            FROM OOSTypeMetadata__mdt
+        ];
+
+        // Step 2: Prepare metadata lookup
+        Map<String, OOSTypeMetadata__mdt> metaMap = new Map<String, OOSTypeMetadata__mdt>();
+        for (OOSTypeMetadata__mdt meta : metaList) {
+            metaMap.put(meta.OOSType__c, meta);
+        }
+
+        // Step 3: Prepare collections for Case update and Chatter posts
+        List<Case> casesToUpdate = new List<Case>();
+        List<FeedItem> chatterPosts = new List<FeedItem>();
+
+        // Step 4: Process each input record
+        for (Id caseId : inputMap.keySet()) {
+            Map<String, String> fieldMap = inputMap.get(caseId);
+
+            for (String keyName : fieldMap.keySet()) {
+                String actualVal = fieldMap.get(keyName);
+
+                if (metaMap.containsKey(keyName)) {
+                    OOSTypeMetadata__mdt meta = metaMap.get(keyName);
+
+                    Boolean isWithinRange = checkValueInRange(actualVal, meta.Range__c);
+
+                    if (isWithinRange) {
+                        // ✅ Within range → update Case paragraph field
+                        Case c = new Case(Id = caseId);
+                        c.Paragraph__c = meta.Paragraph__c;
+                        casesToUpdate.add(c);
+
+                        System.debug('✅ ' + keyName + ' within range → Updating Case field');
+                    } else {
+                        // ❌ Out of range → Post to Chatter
+                        FeedItem fi = new FeedItem();
+                        fi.ParentId = caseId;
+                        fi.Body = '⚠️ ' + keyName + 
+                                  ' value (' + actualVal + 
+                                  ') is outside the defined range (' + meta.Range__c + ').';
+                        chatterPosts.add(fi);
+
+                        System.debug('❌ ' + keyName + ' out of range → Posting to Chatter');
+                    }
+                } else {
+                    System.debug('⚠️ No metadata found for key: ' + keyName);
+                }
+            }
+        }
+
+        // Step 5: Perform DML in bulk-safe manner
+        if (!casesToUpdate.isEmpty()) {
+            update casesToUpdate;
+        }
+        if (!chatterPosts.isEmpty()) {
+            insert chatterPosts;
+        }
+    }
+
+    // Helper method to check if actual value falls within defined range
+    private static Boolean checkValueInRange(String actualValue, String definedRange) {
+        // Example: actualValue = '18%;80', definedRange = '12%-25%;70-80%'
+        List<String> actualParts = actualValue.split(';');
+        List<String> rangeParts = definedRange.split(';');
+
+        for (Integer i = 0; i < Math.min(actualParts.size(), rangeParts.size()); i++) {
+            String act = actualParts[i].replace('%', '').trim();
+            String range = rangeParts[i].replace('%', '').trim();
+
+            if (range.contains('-')) {
+                List<String> limits = range.split('-');
+                Decimal low = Decimal.valueOf(limits[0]);
+                Decimal high = Decimal.valueOf(limits[1]);
+                Decimal actual = Decimal.valueOf(act);
+
+                if (actual < low || actual > high) {
+                    return false;
+                }
+            } else {
+                Decimal actual = Decimal.valueOf(act);
+                Decimal target = Decimal.valueOf(range);
+                if (actual != target) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+}
